@@ -5,9 +5,9 @@ Parámetros centrales del proyecto de modelación de distribución de especies
 (versión local). Todos los scripts importan sus rutas y constantes desde aquí.
 
 Diseño de área (M / G):
-  - M (calibración): unión nacional de subcuencas BNA con presencias. Aquí se
+  - M (calibración): unión de subcuencas con presencias. Aquí se
     muestrean presencias, fondos y pseudo-ausencias, y se calcula el VIF.
-  - G (proyección): subcuenca(s) BNA de la cuenca del Biobío (COD_CUEN = 083).
+  - G (proyección): subcuencas de la cuenca indicada en CUENCA_PROYECCION_COD.
   - Salida: predicción solo en G ∩ M (fuera de M no hay calibración).
 """
 
@@ -20,43 +20,42 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 
 DATA_DIR = ROOT_DIR / "Data"
 
-# Catálogos de especies seleccionadas (4 criterios/atributos EIB)
+# Catálogos de especies (criterios EIB). DATOS FICTICIOS del ejemplo (Data/ejemplo/).
+# Para usar tus propias especies, apunta estas rutas a tus catálogos.
 CATALOGOS = {
-    "amenazada": (DATA_DIR / "Presencias" / "especies_amenazadas_modelables.csv", ","),
-    "singular": (DATA_DIR / "Presencias" / "Especies_singulares.csv", ";"),
-    "valorCultural": (DATA_DIR / "Presencias" / "Especies_valorCultural.csv", ";"),
-    "distRestringida": (DATA_DIR / "Presencias" / "Especies_distRestringida.csv", ";"),
+    "amenazada": (DATA_DIR / "ejemplo" / "catalogos" / "catalogo_amenazadas.csv", ","),
+    "singular": (DATA_DIR / "ejemplo" / "catalogos" / "catalogo_singulares.csv", ","),
 }
 
-# Subcarpetas con los CSV de presencia por especie (Genus_species.csv).
+# Carpetas con los CSV de presencia por especie (genero_especie.csv).
 PRESENCIAS_DIRS = [
-    DATA_DIR / "Presencias" / "Presencias_modelacion" / "amenazadas",
-    DATA_DIR / "Presencias" / "Presencias_modelacion" / "no_amenazadas",
+    DATA_DIR / "ejemplo" / "presencias",
 ]
 
-# Shapefile de subcuencas BNA (DGA) para el cálculo de áreas de modelación
-SUBCUENCAS_SHP = DATA_DIR / "Subcuencas" / "SubCuencas_BNA" / "SubCuencas_BNA.shp"
+# Shapefile de subcuencas para el cálculo de áreas de modelación.
+# Ejemplo: cuadrícula FICTICIA. Para trabajo real, usa tu propio shapefile (p. ej., BNA-DGA).
+SUBCUENCAS_SHP = DATA_DIR / "ejemplo" / "subcuencas" / "subcuencas_ficticias.shp"
 SUBCUENCAS_CAMPOS = {
     "id": "COD_SUBC",     # ID de la subcuenca
     "nombre": "NOM_SUBC", # Nombre de la subcuenca
     "cuenca": "COD_CUEN", # Código de cuenca asociada
 }
-# CRS nativo del shape (SIRGAS-Chile, EPSG:5360 según metadatos del archivo)
-SUBCUENCAS_CRS = 5360
+# CRS de referencia si el shapefile no trae .prj (el ejemplo sí lo trae, en EPSG:4326)
+SUBCUENCAS_CRS = 4326
 
-# Polígonos locales para pseudo-ausencias
+# Polígonos locales para pseudo-ausencias (ejemplo ficticio)
 PSEUDOAUSENCIAS = {
-    "urban": DATA_DIR / "Poligonos_pseudoausencias" / "Areas_Pobladas_Chile.geojson",
-    "relaves": DATA_DIR / "Poligonos_pseudoausencias" / "RelavesMineros.geojson",
+    "urban": DATA_DIR / "ejemplo" / "pseudoausencias" / "areas_urbanas_ficticias.geojson",
+    "relaves": DATA_DIR / "ejemplo" / "pseudoausencias" / "relaves_ficticios.geojson",
 }
 
 # Salidas del PASO A (áreas de modelación)
 AREAS_DIR = DATA_DIR / "Areas_Modelacion"
 AREAS_GPKG = AREAS_DIR / "areas_modelacion.gpkg"
 
-# Cuenca de proyección G (BNA 083 = río Biobío)
-CUENCA_PROYECCION_COD = "083"
-AREA_PROYECCION_GEOJSON = AREAS_DIR / "proyeccion_cuenca_083.geojson"
+# Cuenca de proyección G (código COD_CUEN del shapefile; 900 = cuenca FICTICIA del ejemplo)
+CUENCA_PROYECCION_COD = "900"
+AREA_PROYECCION_GEOJSON = AREAS_DIR / "proyeccion_ejemplo.geojson"
 # Área mínima (km²) de un polígono residual de M ∩ G; menores se descartan
 AREA_MIN_RESIDUO_KM2 = 1.0
 
@@ -74,18 +73,10 @@ LOG_MODELACION_CSV = RESULTADOS_DIR / "log_modelacion.csv"
 # distribución restringida); en ese caso solo se quita el criterio "amenazada".
 AMENAZADA_CATEGORIAS = ("EN", "CR")
 
-# Segmentos de `eecc` SIN paréntesis aplican a todo Chile y se aceptan
-# automáticamente. Los segmentos con paréntesis (restringidos a regiones o
-# islas) requieren decisión explícita (criterio b: solo EN/CR en la zona de
-# interés, Biobío). Revisar esta tabla si cambia el catálogo.
-AMENAZADA_OVERRIDE = {
-    "Araucaria araucana": True,        # EN en Cordillera de Nahuelbuta (Biobío)
-    "Drimys winteri": False,           # EN solo XV-VI; LC en VII-XII
-    "Laterallus jamaicensis": False,   # EN solo XV-III; NT en IV-XII
-    "Hypolepis poeppigii": False,      # EN solo Juan Fernández
-    "Sticherus squamulosus": False,    # EN solo Juan Fernández
-    "Marasmiellus alliiodorus": False, # CR solo Juan Fernández
-}
+# Excepciones explícitas por especie: {"Nombre científico": True/False}.
+# Úsalas cuando la categoría `eecc` aplique solo a una región concreta.
+# Vacío en el ejemplo (todas las especies ficticias usan su categoría directamente).
+AMENAZADA_OVERRIDE: dict[str, bool] = {}
 
 # ---------------------------------------------------------------------------
 # GOOGLE EARTH ENGINE

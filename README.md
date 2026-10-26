@@ -16,9 +16,9 @@ Es una herramienta de **automatización**: no decide qué especies modelar ni c�
 
 ### Ejemplo incluido
 
-El flujo se diseñó y probó con un **ejemplo**: especies de catálogos de especies amenazadas, singulares, de valor cultural y de distribución restringida, en la cuenca del río Biobío (Chile). Los catálogos y los registros de presencia **no se incluyen** en este repositorio (ver [Datos de entrada](#datos-de-entrada)).
+El repositorio incluye un **ejemplo con datos ficticios** (`Data/ejemplo/`): especies con nombres inventados, registros de presencia aleatorios y una cuadrícula de subcuencas también ficticia. Permite probar el flujo completo, incluidas sus reglas de filtrado, sin datos reales. **No son datos de biodiversidad.** Ver [Datos de entrada](#datos-de-entrada).
 
-El ejemplo muestra cómo opera el proceso. **Puedes modelar cualquier especie** que tenga registros de presencia y un área de estudio: basta con preparar tus propios archivos y, si lo necesitas, cambiar la configuración.
+Para usar tus propias especies, prepara tus archivos (catálogos, presencias, subcuencas y pseudo-ausencias) y apunta las rutas en la configuración. **Puedes modelar cualquier especie** que tenga registros de presencia y un área de estudio.
 
 ### Cómo funciona
 
@@ -60,7 +60,7 @@ Antes de correr el proceso, reemplaza el marcador `TU_PROYECTO_GEE` por tu proye
 
 ### Inicio rápido
 
-Con los datos de entrada ya preparados:
+Con el ejemplo incluido o con tus datos ya preparados (con el ejemplo, los pasos 1 y 2 no consumen cuota de GEE; el paso 3 sí):
 
 ```powershell
 # 1. Generar las áreas de modelación (paso A)
@@ -77,7 +77,7 @@ Opciones útiles:
 
 ```powershell
 # Solo algunas especies (nombre científico o id con guion bajo)
-.\.venv\Scripts\python.exe .\Scripts\modelar_especies_batch.py --species "Percilia irwini" percilia_irwini
+.\.venv\Scripts\python.exe .\Scripts\modelar_especies_batch.py --species "Ficticia alpha" ficticia_alpha
 
 # Regenerar aunque el raster ya exista
 .\.venv\Scripts\python.exe .\Scripts\modelar_especies_batch.py --force
@@ -87,7 +87,7 @@ Se recomienda empezar con `--dry-run` y después probar una especie con `--speci
 
 ### Datos de entrada
 
-Los datos no vienen en el repositorio. Debes prepararlos en la carpeta `Data/` (ver `Data/README.md`).
+El repositorio incluye el ejemplo ficticio en `Data/ejemplo/`. Para tus propios datos, prepáralos con la estructura descrita aquí (ver también `Data/README.md`).
 
 #### 1. Catálogo de especies
 
@@ -95,8 +95,8 @@ Archivos CSV con una columna llamada `Especie` (nombre científico). Cada archiv
 
 ```csv
 Especie,eecc
-Percilia irwini,EN
-Chloraea disoides,VU
+Ficticia alpha,EN
+Ficticia gamma,VU
 ```
 
 Una especie puede aparecer en varios catálogos: sus criterios se acumulan.
@@ -123,7 +123,7 @@ Para el paso A, el área M se construye a partir de la **Base Nacional de Aguas 
 
 #### 4. Polígonos de pseudo-ausencias
 
-Dos archivos GeoJSON en `Data/Poligonos_pseudoausencias/`: `Areas_Pobladas_Chile.geojson` y `RelavesMineros.geojson` (nombres configurables en `PSEUDOAUSENCIAS`). Son polígonos donde se muestrean pseudo-ausencias. Si no tienes fuentes equivalentes, puedes preparar tus propios polígonos con el mismo formato.
+Dos archivos GeoJSON de polígonos (urbanos y de relaves), cuyas rutas se configuran en `PSEUDOAUSENCIAS`. Son los polígonos donde se muestrean pseudo-ausencias. En el ejemplo están en `Data/ejemplo/pseudoausencias/`. Si no tienes fuentes equivalentes, puedes preparar tus propios polígonos con el mismo formato.
 
 ### Adaptar a otra región o a otros datos
 
@@ -183,9 +183,10 @@ Los valores de los rasters van de 0 a 1 y representan **idoneidad ambiental rela
 │   ├── ee_utils_local.py             # Utilidades: GEE, catálogos, presencias, VIF, pseudo-ausencias
 │   ├── generar_areas_modelacion.py   # Paso A: áreas de modelación
 │   ├── modelar_especies_batch.py     # Paso B: modelación por lotes
+│   ├── generar_datos_ficticios.py    # Genera el ejemplo ficticio de Data/ejemplo/
 │   ├── crear_entorno_local.ps1       # Crea el entorno virtual e instala dependencias
 │   └── requirements.txt
-├── Data/                             # Datos de entrada (no incluidos; ver Data/README.md)
+├── Data/                             # Datos de entrada: ejemplo ficticio en Data/ejemplo/ (ver Data/README.md)
 ├── Resultados/                       # Salidas (generadas al ejecutar)
 ├── LICENSE
 └── README.md
@@ -207,9 +208,9 @@ It is an **automation** tool: it does not decide which species to model or how t
 
 ### Included example
 
-The workflow was designed and tested with an **example**: species from catalogues of threatened, singular, culturally valued and range-restricted species in the Biobío river basin (Chile). The catalogues and presence records are **not included** in this repository (see [Input data](#input-data)).
+The repository includes an **example with fictitious data** (`Data/ejemplo/`): species with invented names, random presence records and a also fictitious sub-basin grid. It lets you run the full workflow, including its filtering rules, without real data. **It is not biodiversity data.** See [Input data](#input-data).
 
-The example shows how the process works. **You can model any species** that has presence records and a study area: prepare your own files and, if needed, change the configuration.
+To use your own species, prepare your files (catalogues, presence records, sub-basins and pseudo-absences) and point the paths in the configuration. **You can model any species** that has presence records and a study area.
 
 ### How it works
 
@@ -251,7 +252,7 @@ Before running, replace the placeholder `TU_PROYECTO_GEE` with your GEE project 
 
 ### Quick start
 
-With input data already prepared:
+With the included example or your prepared data (with the example, steps 1 and 2 do not use GEE quota; step 3 does):
 
 ```powershell
 # 1. Generate modelling areas (step A)
@@ -268,7 +269,7 @@ Useful options:
 
 ```powershell
 # Only some species (scientific name or id with underscores)
-.\.venv\Scripts\python.exe .\Scripts\modelar_especies_batch.py --species "Percilia irwini" percilia_irwini
+.\.venv\Scripts\python.exe .\Scripts\modelar_especies_batch.py --species "Ficticia alpha" ficticia_alpha
 
 # Regenerate even if the raster already exists
 .\.venv\Scripts\python.exe .\Scripts\modelar_especies_batch.py --force
@@ -278,7 +279,7 @@ It is recommended to start with `--dry-run`, then test one species with `--speci
 
 ### Input data
 
-Data is not included in the repository. Prepare it in the `Data/` folder (see `Data/README.md`).
+The repository includes the fictitious example in `Data/ejemplo/`. For your own data, prepare it following the structure described here (see also `Data/README.md`).
 
 #### 1. Species catalogue
 
@@ -286,8 +287,8 @@ CSV files with a column named `Especie` (scientific name). Each file corresponds
 
 ```csv
 Especie,eecc
-Percilia irwini,EN
-Chloraea disoides,VU
+Ficticia alpha,EN
+Ficticia gamma,VU
 ```
 
 A species may appear in several catalogues; its criteria are combined.
@@ -314,7 +315,7 @@ For step A, the area M is built from the **Base Nacional de Aguas (BNA)** of the
 
 #### 4. Pseudo-absence polygons
 
-Two GeoJSON files in `Data/Poligonos_pseudoausencias/`: `Areas_Pobladas_Chile.geojson` and `RelavesMineros.geojson` (names configurable in `PSEUDOAUSENCIAS`). These are polygons where pseudo-absences are sampled. If you lack equivalent sources, prepare your own polygons in the same format.
+Two GeoJSON polygon files (urban and tailings) whose paths are set in `PSEUDOAUSENCIAS`. These are the polygons where pseudo-absences are sampled. In the example they are in `Data/ejemplo/pseudoausencias/`. If you lack equivalent sources, prepare your own polygons in the same format.
 
 ### Adapting to another region or other data
 
@@ -374,9 +375,10 @@ Raster values range from 0 to 1 and represent **relative environmental suitabili
 │   ├── ee_utils_local.py             # Utilities: GEE, catalogues, presences, VIF, pseudo-absences
 │   ├── generar_areas_modelacion.py   # Step A: modelling areas
 │   ├── modelar_especies_batch.py     # Step B: batch modelling
+│   ├── generar_datos_ficticios.py    # Generates the fictitious example in Data/ejemplo/
 │   ├── crear_entorno_local.ps1       # Creates the virtual environment and installs dependencies
 │   └── requirements.txt
-├── Data/                             # Input data (not included; see Data/README.md)
+├── Data/                             # Input data: fictitious example in Data/ejemplo/ (see Data/README.md)
 ├── Resultados/                       # Outputs (generated when running)
 ├── LICENSE
 └── README.md

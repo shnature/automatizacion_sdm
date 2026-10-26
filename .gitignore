@@ -6,8 +6,10 @@ __pycache__/
 *.pyc
 
 # Datos (no se redistribuyen) / Data (not redistributed)
+# Solo se versiona el ejemplo ficticio en Data/ejemplo/.
 Data/*
 !Data/README.md
+!Data/ejemplo/
 
 # Resultados generados / Generated outputs
 Resultados/
