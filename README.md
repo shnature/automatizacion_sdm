@@ -4,6 +4,8 @@
 
 Idioma / Language: [Español](#español) · [English](#english)
 
+> **Estado / Status:** la etapa de validación cuantitativa del modelo aún no está incluida; se añadirá posteriormente. / The quantitative model validation stage is not included yet and will be added later.
+
 ---
 
 ## Español
@@ -217,7 +219,7 @@ Los valores de los rasters van de 0 a 1 y representan **idoneidad ambiental rela
 - **Idoneidad, no presencia.** Un modelo entrenado con datos de presencia indica qué tan parecidas son las condiciones de cada celda a las de los registros. No confirma que la especie esté allí.
 - **La ausencia de registros no equivale a ausencia de la especie.** Un registro faltante puede deberse a falta de muestreo, de detección o de publicación de datos.
 - **Sesgo de muestreo.** Los modelos reproducen el esfuerzo de muestreo de los datos. Las zonas más visitadas tienden a quedar sobrerrepresentadas.
-- **Sin validación cuantitativa incluida.** El proceso no calcula métricas de desempeño (como AUC). Si las necesitas, deben añadirse como parte de tu análisis.
+- **Validación pendiente.** El proceso aún no incluye una etapa de validación cuantitativa (por ejemplo, AUC o evaluación con datos independientes). Se añadirá en una versión posterior. Mientras tanto, los resultados deben interpretarse como un modelo preliminar, sin métricas de desempeño.
 - **Resolución.** Los predictores se procesan a 250 m. Especies de distribución muy localizada pueden requerir una resolución más fina y datos más precisos.
 - **Datos sensibles.** Publicar coordenadas exactas de especies amenazadas puede exponerlas a perturbación. Considera generalizar o agregar esas coordenadas antes de compartir resultados.
 - **Cuota de GEE.** Las áreas grandes consumen más cuota y tiempo. `AREA_MODELACION_MAX_KM2` ayuda a controlarlo.
@@ -457,7 +459,7 @@ Raster values range from 0 to 1 and represent **relative environmental suitabili
 - **Suitability, not presence.** A model trained on presence data indicates how similar the conditions of each cell are to those of the records. It does not confirm that the species is there.
 - **Absence of records is not absence of the species.** A missing record may reflect lack of sampling, detection or data publication.
 - **Sampling bias.** Models reflect the sampling effort in the data. Heavily surveyed areas tend to be overrepresented.
-- **No quantitative validation included.** The process does not compute performance metrics (such as AUC). If you need them, add them as part of your analysis.
+- **Validation pending.** The process does not yet include a quantitative validation stage (for example AUC or evaluation with independent data). It will be added in a later version. Until then, results should be interpreted as a preliminary model without performance metrics.
 - **Resolution.** Predictors are processed at 250 m. Very localised species may require finer resolution and more precise data.
 - **Sensitive data.** Publishing exact coordinates of threatened species may expose them to disturbance. Consider generalising or withholding those coordinates before sharing results.
 - **GEE quota.** Large areas consume more quota and time. `AREA_MODELACION_MAX_KM2` helps control this.
