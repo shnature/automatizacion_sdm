@@ -31,13 +31,61 @@ El proceso tiene dos pasos:
 
 Pasos del paso B, por especie:
 
-1. **Predictores.** Mediana de embeddings satelitales anuales de GEE (`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`) en un rango de años configurable, más una capa de uso de suelo (MapBiomas Chile), en una grilla métrica de 250 m.
+1. **Predictores.** Mediana de embeddings satelitales anuales de AlphaEarth Foundations (`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`) en 2017–2024, más una capa de uso de suelo de MapBiomas Chile, en una grilla métrica de 250 m. Ver [Detalles técnicos](#detalles-técnicos).
 2. **Selección de variables.** Muestreo local de celdas válidas y eliminación iterativa de variables con factor de inflación de la varianza (VIF ≥ 10 por defecto).
 3. **Celdas de entrenamiento.** Presencias (una por celda y con *thinning* espacial de ~1 km), fondos aleatorios dentro de M y pseudo-ausencias en polígonos configurables (p. ej., áreas urbanas o de relaves). Ninguna celda aparece en dos clases.
 4. **Entrenamiento.** MaxEnt en GEE, en modo de probabilidad.
 5. **Exportación.** Predicción recortada a G ∩ M y descargada como GeoTIFF (EPSG:32719, 250 m) con [geedim](https://github.com/dugalh/geedim).
 
 Cada corrida queda registrada en `Resultados/log_modelacion.csv` con su estado y sus cifras. Las corridas con raster existente se omiten, así que el proceso se puede detener y reanudar.
+
+### Detalles técnicos
+
+#### Fuentes de datos ambientales
+
+| Fuente | Qué es | Uso en el proceso |
+|---|---|---|
+| **Google Satellite Embedding V1** (`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`), producido con el modelo **AlphaEarth Foundations** de Google y Google DeepMind | Vector de embedding de **64 dimensiones** (bandas `A00`–`A63`) por píxel de **10 m** y por año, que resume la información de múltiples sensores ópticos, radar y otras fuentes. Disponible para 2017–2024. | Predictores continuos: mediana de los mosaicos anuales 2017–2024 |
+| **MapBiomas Chile**, Colección 2, *clasificación final 2* (`projects/mapbiomas-chile/assets/LULC/COLLECTION-02/...`) | Clasificación anual de cobertura y uso de suelo, con una banda `classification_<año>` por año | Predictor categórico `uso_suelo`, con el año más reciente disponible hasta 2024 (respaldo: 2022) |
+
+Notas sobre los embeddings:
+- Cada dimensión es **una coordenada abstracta** del espacio de embeddings, no una variable física. Por eso el proceso no reporta importancia de variables en términos ecológicos.
+- Los vectores tienen norma unitaria y no requieren normalización adicional.
+- La colección se actualiza. Según su catálogo, la versión 1.1 (desde el 17 de noviembre de 2025) incluye una capa de 2017 regenerada; los resultados pueden cambiar si se usa otra versión.
+
+#### Flujo de procesamiento por especie
+
+1. **Área M y G.** M es la unión de unidades de cuenca con presencias; G es la cuenca de proyección. La salida se calcula en G ∩ M.
+2. **Predictores.** Se construye un mosaico anual por año (2017–2024) y se calcula la mediana entre esos mosaicos. Se agrega el uso de suelo y todo se recorta a M, en EPSG:32719 y 250 m.
+3. **Selección de variables (VIF).** Se descarga localmente una grilla de M (500 m, o 1 000 m si el área supera 50 000 km²), se muestrean 1 500 celdas válidas y se eliminan iterativamente las variables con VIF ≥ 10.
+4. **Celdas de entrenamiento.** Se descarga localmente la grilla de 250 m con las variables seleccionadas, y se leen los valores con `rasterio`. Las presencias se asignan a celdas y se aplica *thinning* de 1 km (un punto por bloque de 4 × 4 celdas). Los fondos son celdas aleatorias de M (1:1 con las presencias). Las pseudo-ausencias son el 25 % de las presencias (mínimo 5) por cada fuente de polígonos. Ninguna celda se repite entre clases; el proceso lo verifica en cada corrida.
+5. **Modelo.** `ee.Classifier.amnhMaxent()` en modo `PROBABILITY`, con parámetros por defecto (no hay ajuste de hiperparámetros). Las presencias tienen etiqueta 1; los fondos y las pseudo-ausencias, etiqueta 0. El entrenamiento usa una `FeatureCollection` de solo propiedades, subida a GEE.
+6. **Predicción y exportación.** La predicción se recorta a G ∩ M y se descarga con **geedim** como GeoTIFF en EPSG:32719 a 250 m. El proceso verifica el CRS y la resolución del archivo.
+
+#### Parámetros principales
+
+| Parámetro | Valor | Efecto |
+|---|---|---|
+| `CRS_CANONICO` | `EPSG:32719` | Sistema de coordenadas de trabajo (UTM 19S) |
+| `TARGET_SCALE` | 250 m | Tamaño de píxel de predictores, entrenamiento y salida |
+| `EMBEDDINGS_RANGO_MEDIA` | 2017–2024 | Años de la mediana de embeddings |
+| `VIF_THRESHOLD` / `VIF_NUM_PIXELS` | 10 / 1 500 | Umbral y muestra para la selección de variables |
+| `THINNING_METERS` | 1 000 m | Separación mínima entre presencias de entrenamiento |
+| `FONDO_RATIO` / `PSEUDO_RATIO` / `MIN_PSEUDO` | 1,0 / 0,25 / 5 | Fondos y pseudo-ausencias respecto de las presencias |
+| `MIN_RECORDS` / `MIN_CELDAS_PRESENCIA` | 20 / 20 | Mínimos de registros y de bloques de presencia |
+| `AREA_MODELACION_MAX_KM2` | 20 000 km² | Área M máxima para lanzar corridas nuevas |
+| `GEE_REINTENTOS` / `GEE_BACKOFF_S` | 3 / 10 s | Reintentos ante errores transitorios de GEE |
+
+#### Entorno y dependencias
+
+Dependencias mínimas en `Scripts/requirements.txt`: `earthengine-api` ≥ 1.7.0, `geopandas` ≥ 1.1.0, `shapely` ≥ 2.1.0, `pyproj` ≥ 3.7.0, `pandas` ≥ 2.3.0, `numpy` ≥ 2.0.0, `statsmodels` ≥ 0.14.4, `scikit-learn` ≥ 1.7.0, `geedim` ≥ 2.0.0 y `rasterio` ≥ 1.5.0.
+
+#### Reproducibilidad y costo
+
+- Las selecciones aleatorias (fondos, pseudo-ausencias y *thinning*) usan **semillas deterministas** por especie. Con los mismos datos y la misma versión de GEE, las celdas de entrenamiento son las mismas.
+- Los resultados **no son idénticos entre versiones** de los datasets de GEE, porque los embeddings y MapBiomas pueden actualizarse.
+- Cada descarga de GEE consume cuota. Las áreas grandes son las más costosas: `AREA_MODELACION_MAX_KM2` ayuda a controlarlo.
+- El proceso evita tablas grandes en el endpoint interactivo de GEE y descarga grillas raster con `computePixels` (vía geedim), que es más estable para predictores pesados.
 
 ### Requisitos
 
@@ -223,13 +271,61 @@ The process has two steps:
 
 Step B, per species:
 
-1. **Predictors.** Median of annual GEE satellite embeddings (`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`) over a configurable year range, plus a land-cover layer (MapBiomas Chile), on a 250 m metric grid.
+1. **Predictors.** Median of annual AlphaEarth Foundations satellite embeddings (`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`) for 2017–2024, plus a land-cover layer from MapBiomas Chile, on a 250 m metric grid. See [Technical details](#technical-details).
 2. **Variable selection.** Local sampling of valid cells and iterative removal of variables with variance inflation factor (VIF ≥ 10 by default).
 3. **Training cells.** Presences (one per cell, spatially thinned to ~1 km), random background cells within M, and pseudo-absences in configurable polygons (e.g. urban or tailings areas). No cell belongs to two classes.
 4. **Training.** MaxEnt in GEE, probability output mode.
 5. **Export.** Prediction clipped to G ∩ M and downloaded as GeoTIFF (EPSG:32719, 250 m) with [geedim](https://github.com/dugalh/geedim).
 
 Each run is logged in `Resultados/log_modelacion.csv` with its status and figures. Runs with an existing raster are skipped, so the process can be stopped and resumed.
+
+### Technical details
+
+#### Environmental data sources
+
+| Source | What it is | Use in the process |
+|---|---|---|
+| **Google Satellite Embedding V1** (`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`), produced with the **AlphaEarth Foundations** model by Google and Google DeepMind | Annual embedding vector of **64 dimensions** (bands `A00`–`A63`) per **10 m** pixel, summarising optical, radar and other multi-source observations. Available for 2017–2024. | Continuous predictors: median of the 2017–2024 annual mosaics |
+| **MapBiomas Chile**, Collection 2, *clasificación final 2* (`projects/mapbiomas-chile/assets/LULC/COLLECTION-02/...`) | Annual land-cover and land-use classification, with one `classification_<year>` band per year | Categorical predictor `uso_suelo`, using the most recent year available up to 2024 (fallback: 2022) |
+
+Notes on the embeddings:
+- Each dimension is an **abstract coordinate** in the embedding space, not a physical variable. For this reason the process does not report ecological variable importance.
+- Vectors have unit norm and need no additional normalisation.
+- The collection is updated. According to its catalogue, version 1.1 (from 17 November 2025) includes a regenerated 2017 layer; results may change with other versions.
+
+#### Per-species processing flow
+
+1. **Areas M and G.** M is the union of basin units containing presences; G is the projection basin. Output is computed on G ∩ M.
+2. **Predictors.** One annual mosaic per year (2017–2024) is built and the median across those mosaics is computed. Land use is added, and everything is clipped to M, in EPSG:32719 at 250 m.
+3. **Variable selection (VIF).** A grid of M is downloaded locally (500 m, or 1 000 m if the area exceeds 50 000 km²), 1 500 valid cells are sampled, and variables with VIF ≥ 10 are removed iteratively.
+4. **Training cells.** The 250 m grid with the selected variables is downloaded locally and read with `rasterio`. Presences are assigned to cells and thinned to 1 km (one point per 4 × 4 cell block). Background points are random cells within M (1:1 with presences). Pseudo-absences are 25 % of the presences (minimum 5) per polygon source. No cell is shared between classes; the process checks this on every run.
+5. **Model.** `ee.Classifier.amnhMaxent()` in `PROBABILITY` mode, with default parameters (no hyperparameter tuning). Presences have label 1; background and pseudo-absences have label 0. Training uses a property-only `FeatureCollection` uploaded to GEE.
+6. **Prediction and export.** The prediction is clipped to G ∩ M and downloaded with **geedim** as a GeoTIFF in EPSG:32719 at 250 m. The process checks the file's CRS and resolution.
+
+#### Main parameters
+
+| Parameter | Value | Effect |
+|---|---|---|
+| `CRS_CANONICO` | `EPSG:32719` | Working coordinate system (UTM 19S) |
+| `TARGET_SCALE` | 250 m | Pixel size for predictors, training and output |
+| `EMBEDDINGS_RANGO_MEDIA` | 2017–2024 | Years in the embedding median |
+| `VIF_THRESHOLD` / `VIF_NUM_PIXELS` | 10 / 1 500 | Threshold and sample for variable selection |
+| `THINNING_METERS` | 1 000 m | Minimum separation between training presences |
+| `FONDO_RATIO` / `PSEUDO_RATIO` / `MIN_PSEUDO` | 1.0 / 0.25 / 5 | Background and pseudo-absences relative to presences |
+| `MIN_RECORDS` / `MIN_CELDAS_PRESENCIA` | 20 / 20 | Minimum records and presence blocks |
+| `AREA_MODELACION_MAX_KM2` | 20 000 km² | Maximum M area for starting new runs |
+| `GEE_REINTENTOS` / `GEE_BACKOFF_S` | 3 / 10 s | Retries on transient GEE errors |
+
+#### Environment and dependencies
+
+Minimum dependencies in `Scripts/requirements.txt`: `earthengine-api` ≥ 1.7.0, `geopandas` ≥ 1.1.0, `shapely` ≥ 2.1.0, `pyproj` ≥ 3.7.0, `pandas` ≥ 2.3.0, `numpy` ≥ 2.0.0, `statsmodels` ≥ 0.14.4, `scikit-learn` ≥ 1.7.0, `geedim` ≥ 2.0.0 and `rasterio` ≥ 1.5.0.
+
+#### Reproducibility and cost
+
+- Random selections (background, pseudo-absences and thinning) use **deterministic seeds** per species. With the same data and the same GEE dataset versions, the training cells are the same.
+- Results are **not identical across dataset versions**, because the embeddings and MapBiomas may be updated.
+- Each GEE download consumes quota. Large areas are the most expensive: `AREA_MODELACION_MAX_KM2` helps control this.
+- The process avoids large tables on GEE's interactive endpoint and downloads raster grids with `computePixels` (via geedim), which is more stable for heavy predictors.
 
 ### Requirements
 
