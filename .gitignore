@@ -1,0 +1,24 @@
+# Entorno virtual / Virtual environment
+.venv/
+
+# Caché de Python / Python cache
+__pycache__/
+*.pyc
+
+# Datos (no se redistribuyen) / Data (not redistributed)
+Data/*
+!Data/README.md
+
+# Resultados generados / Generated outputs
+Resultados/
+
+# Credenciales y configuración local / Local credentials and configuration
+*.env
+.config/
+credentials*
+
+# Editores y sistema / Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

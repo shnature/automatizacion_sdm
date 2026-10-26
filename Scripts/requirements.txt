@@ -1,0 +1,10 @@
+earthengine-api>=1.7.0
+geopandas>=1.1.0
+shapely>=2.1.0
+pyproj>=3.7.0
+pandas>=2.3.0
+numpy>=2.0.0
+statsmodels>=0.14.4
+scikit-learn>=1.7.0
+geedim>=2.0.0
+rasterio>=1.5.0
