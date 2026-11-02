@@ -137,11 +137,48 @@ GEE_BACKOFF_S = 10            # backoff base (s) entre reintentos
 PREDICTORES_CACHE_DIR = RESULTADOS_DIR / "_cache_predictores"  # TIFFs temporales
 
 # ---------------------------------------------------------------------------
+# ÁREAS DE MODELACIÓN: casco convexo de presencias
+# ---------------------------------------------------------------------------
+# Además de las subcuencas con presencias (directas o por fallback), se incluye
+# TODAS las unidades de cuenca que intersectan el CASCO CONVEXO de las
+# presencias de la especie. Así el área M cubre la distribución posible entre
+# la presencia más austral y la más boreal sin quedar fragmentada en parches
+# desalineados. Aplica a todas las especies (el casco de especies marinas se
+# apoya en el mar y toma solo las unidades costeras que intersecta).
+INCLUIR_CASCO_CONVEXO = True
+CASCO_MIN_PRES = 3  # mínimo de presencias para calcular el casco
+
+# ---------------------------------------------------------------------------
+# ÁREAS DE MODELACIÓN: presencias outliers y Chile continental
+# ---------------------------------------------------------------------------
+# Outliers: presencencia AISLADA = distancia al k-ésimo vecino más cercano >
+# OUTLIER_KNN_KM (en métrica UTM). Se descarta de todo el paso A, así que el
+# casco no la engloba y el paso B la deja fuera vía n_fuera_m. El criterio es
+# espacial (por aislamiento), no univariado: no corta colas legítimas de
+# distribuciones bimodales o de amplio rango. Resultados/outliers_descartados.csv
+# registra cada descarte con su distancia, para revisión caso a caso.
+OUTLIER_FILTRO = True
+OUTLIER_KNN_K = 3       # vecino de referencia
+OUTLIER_KNN_KM = 100    # umbral de aislamiento (km)
+OUTLIER_MIN_PRES = 10   # con menos presencias, no se filtra (casos muy chicos)
+OUTLIERS_LOG_CSV = RESULTADOS_DIR / "outliers_descartados.csv"
+
+# Chile continental: de la capa de subcuencas solo se conservan las unidades
+# cuyo punto representativo queda dentro del rectángulo continental. En la
+# capa BNA (DGA) este filtro deja fuera únicamente Isla de Pascua (lon -109.4)
+# e Islas Juan Fernández (lon -78.8); si la capa incluye otras unidades
+# oceánicas, este filtro también las dejaría fuera.
+CONTINENTE_LON_MIN = -76.0
+CONTINENTE_LAT_MIN = -56.6
+CONTINENTE_LAT_MAX = -17.4
+
+# ---------------------------------------------------------------------------
 # ÁREAS DE MODELACIÓN: subcuencas "envueltas"
 # ---------------------------------------------------------------------------
 # Se rellenan los huecos internos de la unión de subcuencas con presencias y se
 # incorpora toda subcuenca cuya área caiga >= TOLERANCIA_COBERTURA dentro de la
-# geometría rellenada.
+# geometría rellenada. (Complemento del casco convexo, para vacíos interiores
+# que queden tras la selección.)
 INCLUIR_SUBCUENCAS_ENVUELTAS = True
 TOLERANCIA_COBERTURA = 0.99
 

@@ -3,14 +3,25 @@ generar_areas_modelacion.py
 ===========================
 PASO A: genera automáticamente el área de modelación de cada especie EIB.
 
-Para cada especie (de los 4 catálogos):
+Para cada especie (de los catálogos configurados):
 1. Carga TODAS sus presencias (todos los años) desde Data/Presencias.
-2. Selecciona las subcuencas BNA (DGA) que contienen presencias
-   (intersección directa de cada punto con una subcuenca).
-3. Los puntos que caen fuera de TODAS las subcuencas (típico en especies
+2. Filtra presencias OUTLIERS: se descarta una presencencia aislada cuando su
+   3er vecino más cercano queda a más de OUTLIER_KNN_KM (100 km por defecto).
+   Especies con < OUTLIER_MIN_PRES presencias no se filtran. Cada descarte
+   queda en Resultados/outliers_descartados.csv (auditoría).
+3. Se cargan las subcuencas BNA (DGA) y se conservan solo las de Chile
+   continental (queda fuera Isla de Pascua y Juan Fernández).
+4. Selecciona las subcuencas que contienen presencias (intersección directa).
+5. Los puntos que caen fuera de TODAS las subcuencas (típico en especies
    marinas/costeras) se asignan a la subcuenca más cercana (fallback).
-4. El área de modelación es la unión de las subcuencas seleccionadas.
-5. Guarda un GeoJSON por especie + un GPKG consolidado + un resumen CSV.
+6. CASCO CONVEXO: se calcula el casco
+   convexo de las presencias (ya sin outliers) y se incorporan TODAS las
+   subcuencas que intersectan el casco. Así el área M cubre la distribución
+   posible de sur a norte sin quedar fragmentada. Con menos de
+   CASCO_MIN_PRES presencias, se omite el casco.
+7. Se rellenan los huecos internos residuales (subcuencas "envueltas").
+8. El área de modelación es la unión de las subcuencas seleccionadas.
+9. Guarda un GeoJSON por especie + un GPKG consolidado + un resumen CSV.
 
 Ejecución:
     .\\.venv\\Scripts\\python.exe .\\Scripts\\generar_areas_modelacion.py
@@ -25,6 +36,7 @@ import sys
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 from shapely.geometry import Point
 
@@ -43,6 +55,86 @@ LOGGER = logging.getLogger("areas")
 def _utm_epsg_para(lon: float) -> int:
     """EPSG UTM 18S/19S según la longitud, para cálculos métricos."""
     return 32719 if lon >= -72.0 else 32718
+
+
+def _subcuencas_continente(subcuencas: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Deja solo las subcuencas de Chile CONTINENTAL.
+
+    Descarta las features cuyo punto representativo queda fuera del
+    rectángulo continental (config CONTINENTE_*). En la capa BNA este filtro
+    deja fuera únicamente Isla de Pascua e Islas Juan Fernández.
+    """
+    rp = subcuencas.geometry.representative_point()
+    dentro = pd.Series(
+        (rp.x >= cfg.CONTINENTE_LON_MIN)
+        & (rp.y >= cfg.CONTINENTE_LAT_MIN)
+        & (rp.y <= cfg.CONTINENTE_LAT_MAX),
+        index=subcuencas.index,
+    )
+    excluidas = subcuencas[~dentro]
+    if not excluidas.empty:
+        nombres = excluidas[cfg.SUBCUENCAS_CAMPOS["nombre"]].astype(str).unique().tolist()
+        LOGGER.info(
+            "Chile continental: %d subcuencas NO continentales excluidas (%s).",
+            len(excluidas), "; ".join(nombres),
+        )
+    return subcuencas[dentro].copy()
+
+
+def _filtrar_outliers(
+    especie: str,
+    gdf_pts: gpd.GeoDataFrame,
+) -> tuple[gpd.GeoDataFrame, list[dict]]:
+    """Descarta presencias AISLADAS (criterio kNN).
+
+    Distancia al OUTLIER_KNN_K-ésimo vecino más cercano, en métrica UTM
+    (zona de la especie). Punto con distancia > OUTLIER_KNN_KM sale de todo
+    el paso A. El criterio es espacial, no univariado: no corta colas
+    legítimas de distribuciones bimodales o de amplio rango.
+
+    Devuelve (gdf_sin_outliers, filas_log) con cada descarte para el CSV de
+    auditoría. Especies con < OUTLIER_MIN_PRES presencias no se filtran.
+    """
+    if not cfg.OUTLIER_FILTRO or len(gdf_pts) < cfg.OUTLIER_MIN_PRES:
+        return gdf_pts, []
+
+    from pyproj import Transformer
+    from scipy.spatial import cKDTree
+
+    lat = gdf_pts["latitude"].to_numpy(dtype=float)
+    lon = gdf_pts["longitude"].to_numpy(dtype=float)
+    tr = Transformer.from_crs(
+        "EPSG:4326", f"EPSG:{_utm_epsg_para(float(np.median(lon)))}", always_xy=True
+    )
+    x, y = tr.transform(lon, lat)
+
+    # k+1 incluye el propio punto (distancia 0), así que la fila k-ésima tras
+    # descartarlo d2 es exactamente el k-ésimo vecino ajeno.
+    k = min(cfg.OUTLIER_KNN_K + 1, len(gdf_pts))
+    dist_vecinos, _ = cKDTree(np.c_[x, y]).query(np.c_[x, y], k=k)
+    dist_k = np.atleast_2d(dist_vecinos)[:, -1]
+
+    fuera = dist_k > cfg.OUTLIER_KNN_KM * 1000.0
+    if not fuera.any():
+        return gdf_pts, []
+
+    filas: list[dict] = []
+    anios = gdf_pts["Anio"] if "Anio" in gdf_pts.columns else gdf_pts.get("year")
+    for pos in np.where(fuera)[0]:
+        filas.append(
+            {
+                "especie": especie,
+                "anio": None if anios is None else anios.iloc[pos],
+                "latitud": round(float(lat[pos]), 6),
+                "longitud": round(float(lon[pos]), 6),
+                "dist_knn_km": round(float(dist_k[pos]) / 1000.0, 1),
+            }
+        )
+    LOGGER.info(
+        "    [outliers] %d presencias aisladas descartadas (kNN %d > %d km).",
+        len(filas), cfg.OUTLIER_KNN_K, cfg.OUTLIER_KNN_KM,
+    )
+    return gdf_pts.iloc[~fuera].copy(), filas
 
 
 def _rellenar_huecos(geom):
@@ -117,25 +209,81 @@ def _indices_envueltas(
     return sorted(envueltas), n_huecos
 
 
+# ---------------------------------------------------------------------------
+# CASCO CONVEXO DE PRESENCIAS
+# (equivale a st_convex_hull + selección de unidades que intersectan el casco,
+# criterio validado antes con un prototipo en R)
+# ---------------------------------------------------------------------------
+def _subcuencas_casco(
+    subcuencas: gpd.GeoDataFrame,
+    gdf_pts: gpd.GeoDataFrame,
+) -> tuple[list[int], float | None]:
+    """Subcuencas que intersectan el casco convexo de las presencias.
+
+    Criterio `st_convex_hull` + selección de todas las unidades de cuenca que
+    intersectan el casco (equivalente a un prototipo previo en R). Con <
+    CASCO_MIN_PRES presencias se omite el casco y solo cuentan las
+    subcuencas con presencias.
+
+    Devuelve (indices_nuevos, area_casco_km2) con indices_nuevos excluyendo
+    los ya seleccionados por el caller. area_casco_km2 es None si el casco no
+    es poligonal (puntos colineales) o el casco está desactivado.
+    """
+    import shapely
+
+    if not cfg.INCLUIR_CASCO_CONVEXO or len(gdf_pts) < cfg.CASCO_MIN_PRES:
+        if cfg.INCLUIR_CASCO_CONVEXO:
+            LOGGER.info(
+                "    [casco] %d presencias < %d: se omite el casco (selección directa).",
+                len(gdf_pts), cfg.CASCO_MIN_PRES,
+            )
+        return [], None
+
+    hull = gdf_pts.geometry.union_all().convex_hull
+
+    area_casco: float | None = None
+    if hull.geom_type == "Polygon":
+        # Un casco no poligonal (puntos colineales) no tiene área.
+        centro = hull.representative_point()
+        area_casco = round(
+            gpd.GeoSeries([hull], crs=4326).to_crs(_utm_epsg_para(centro.x)).area.iloc[0] / 1e6,
+            1,
+        )
+
+    # Subcuencas que intersectan el casco (topología del casco, no del grafo
+    # de adyacencia: robusta ante los huecos/salientes de la capa BNA).
+    mask = shapely.intersects(hull, subcuencas.geometry.values)
+    idx_casco = subcuencas.index[mask].tolist()
+    return idx_casco, area_casco
+
+
 def area_para_especie(
     especie: str,
     presencias: pd.DataFrame,
     subcuencas: gpd.GeoDataFrame,
-) -> tuple[dict | None, "object"]:
+) -> tuple[dict | None, "object", list[dict]]:
     """Calcula el área de modelación de una especie.
 
-    Devuelve (registro_resumen, geometría_union) o (None, None) si no es posible.
+    Devuelve (registro_resumen, geometría_union, fichas_outliers) o
+    (None, None, fichas_outliers) si no es posible.
     """
     pts = presencias.dropna(subset=["latitude", "longitude"]).copy()
     if pts.empty:
         LOGGER.warning("%s: sin presencias válidas.", especie)
-        return None, None
+        return None, None, None
 
     gdf_pts = gpd.GeoDataFrame(
         pts,
         geometry=[Point(x, y) for x, y in zip(pts["longitude"], pts["latitude"])],
         crs="EPSG:4326",
     )
+
+    # ------------------------------------------------------------------
+    # 0. Presencias outliers (aisladas) fuera del área de modelación
+    # ------------------------------------------------------------------
+    n_antes = len(gdf_pts)
+    gdf_pts, outliers_log = _filtrar_outliers(especie, gdf_pts)
+    n_outliers = n_antes - len(gdf_pts)
 
     # ------------------------------------------------------------------
     # 1. Puntos dentro de alguna subcuenca (intersección)
@@ -170,10 +318,24 @@ def area_para_especie(
 
     if not idx_sel:
         LOGGER.error("%s: no se pudo asignar ninguna subcuenca.", especie)
-        return None, None
+        return None, None, outliers_log
 
     # ------------------------------------------------------------------
-    # 3. Subcuencas 'envueltas': huecos internos entre las seleccionadas
+    # 3. CASCO CONVEXO de las presencias (sin outliers): subcuencas que
+    #    intersectan el casco (intersección espacial, sin grafo de adyacencia).
+    # ------------------------------------------------------------------
+    idx_casco, area_casco = _subcuencas_casco(subcuencas, gdf_pts)
+    n_casco = len(set(idx_casco) - set(idx_sel))
+    if idx_casco:
+        LOGGER.info(
+            "    [casco] %d subcuencas nuevas | área del casco: %s km²",
+            n_casco,
+            f"{area_casco:,.1f}" if area_casco is not None else "n.d. (colineal)",
+        )
+        idx_sel = sorted(set(idx_sel) | set(idx_casco))
+
+    # ------------------------------------------------------------------
+    # 4. Subcuencas 'envueltas': huecos internos entre las seleccionadas
     # ------------------------------------------------------------------
     idx_env, n_huecos = _indices_envueltas(subcuencas, idx_sel)
     n_envueltas = len(set(idx_env) - set(idx_sel))
@@ -200,7 +362,8 @@ def area_para_especie(
 
     resumen = {
         "especie": especie,
-        "n_puntos": int(len(gdf_pts)),
+        "n_puntos": int(n_antes),
+        "n_outliers": int(n_outliers),
         "puntos_inside": n_puntos_inside,
         "puntos_fallback": n_puntos_fallback,
         "dist_fallback_max_km": round(
@@ -208,6 +371,8 @@ def area_para_especie(
         ) if distancias_fallback else 0.0,
         "n_subcuencas_direct": n_subcuencas_direct,
         "n_subcuencas_envueltas": n_envueltas,
+        "n_subcuencas_casco": n_casco,
+        "area_casco_km2": area_casco,
         "n_huecos_detectados": n_huecos,
         "n_subcuencas": len(idx_sel),
         "codigos_subcuencas": ",".join(sorted(set(ids_subc))),
@@ -215,7 +380,7 @@ def area_para_especie(
         "area_km2": area_km2,
         "nombres_subcuencas": ";".join(sorted(nombres_subc)),
     }
-    return resumen, union_geom
+    return resumen, union_geom, outliers_log
 
 
 def area_proyeccion(subcuencas: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -251,8 +416,8 @@ def main() -> None:
     LOGGER.info("Especies en catálogo: %d", len(catalogo))
 
     LOGGER.info("Cargando subcuencas BNA (%s)...", cfg.SUBCUENCAS_SHP.name)
-    subcuencas = eel.load_subcuencas()
-    LOGGER.info("Subcuencas: %d features.", len(subcuencas))
+    subcuencas = _subcuencas_continente(eel.load_subcuencas())
+    LOGGER.info("Subcuencas: %d features (Chile continental).", len(subcuencas))
 
     cfg.AREAS_DIR.mkdir(parents=True, exist_ok=True)
     cfg.RESULTADOS_DIR.mkdir(parents=True, exist_ok=True)
@@ -268,6 +433,7 @@ def main() -> None:
     resumenes: list[dict] = []
     features_out: list[gpd.GeoDataFrame] = []
     sin_presencia: list[str] = []
+    descartes_outliers: list[dict] = []
 
     for _, fila in catalogo.iterrows():
         especie = fila["especie"]
@@ -280,9 +446,10 @@ def main() -> None:
             continue
 
         LOGGER.info(">>> %s (%d presencias)", especie, len(presencias))
-        resumen, union_geom = area_para_especie(especie, presencias, subcuencas)
+        resumen, union_geom, outliers_log = area_para_especie(especie, presencias, subcuencas)
         if resumen is None:
             continue
+        descartes_outliers.extend(outliers_log)
         resumen["criterios"] = criterios
 
         gdf_area = gpd.GeoDataFrame(
@@ -300,8 +467,9 @@ def main() -> None:
         resumenes.append(resumen)
 
         LOGGER.info(
-            "    %d subcuencas (%d directas, %d envueltas) | fallback: %d pts | área %.1f km²",
+            "    %d subcuencas (%d directas, %d por casco, %d envueltas) | fallback: %d pts | área %.1f km²",
             resumen["n_subcuencas"], resumen["n_subcuencas_direct"],
+            resumen["n_subcuencas_casco"],
             resumen["n_subcuencas_envueltas"], resumen["puntos_fallback"],
             resumen["area_km2"],
         )
@@ -309,6 +477,15 @@ def main() -> None:
     resumen_df = pd.DataFrame(resumenes)
     if not resumen_df.empty:
         resumen_df.to_csv(cfg.RESUMEN_AREAS_CSV, index=False)
+
+        if descartes_outliers:
+            df_out = pd.DataFrame(descartes_outliers)
+            df_out.to_csv(cfg.OUTLIERS_LOG_CSV, index=False, encoding="utf-8-sig")
+            LOGGER.info(
+                "Presencias outliers descartadas: %d (auditoría: %s)",
+                len(df_out), cfg.OUTLIERS_LOG_CSV.name,
+            )
+
         gdf_all = gpd.GeoDataFrame(
             pd.concat(features_out, ignore_index=True), crs="EPSG:4326"
         )
@@ -321,8 +498,8 @@ def main() -> None:
         LOGGER.warning("No se generó ningún área.")
 
     LOGGER.info("=" * 60)
-    LOGGER.info("ÁREAS GENERADAS: %d | sin CSV de presencias: %d",
-                len(resumenes), len(sin_presencia))
+    LOGGER.info("ÁREAS GENERADAS: %d | sin CSV de presencias: %d | outliers descartados: %d",
+                len(resumenes), len(sin_presencia), len(descartes_outliers))
     for s in sin_presencia:
         LOGGER.info("  - sin presencias: %s", s)
     LOGGER.info("=" * 60)

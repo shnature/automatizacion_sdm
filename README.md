@@ -28,7 +28,7 @@ El proceso tiene dos pasos:
 
 | Paso | Script | Qué hace |
 |---|---|---|
-| **A. Áreas de modelación** | `Scripts/generar_areas_modelacion.py` | Define, para cada especie, el área de calibración **M** (unión de unidades de cuenca que contienen presencias) y el área de proyección **G** (una cuenca). La salida se calcula en **G ∩ M**. |
+| **A. Áreas de modelación** | `Scripts/generar_areas_modelacion.py` | Define, para cada especie, el área de calibración **M** (unión de unidades de cuenca con presencias y de las que intersectan su casco convexo, tras un filtro de presencias outliers) y el área de proyección **G** (una cuenca). La salida se calcula en **G ∩ M**. |
 | **B. Modelación por lotes** | `Scripts/modelar_especies_batch.py` | Ejecuta un modelo por especie (ver pasos abajo). |
 
 Pasos del paso B, por especie:
@@ -57,7 +57,7 @@ Notas sobre los embeddings:
 
 #### Flujo de procesamiento por especie
 
-1. **Área M y G.** M es la unión de unidades de cuenca con presencias; G es la cuenca de proyección. La salida se calcula en G ∩ M.
+1. **Área M y G.** Se descartan presencias outliers (aisladas: distancia al 3er vecino más cercano > 100 km, registradas en un CSV de auditoría). De la capa de cuencas solo se conservan unidades de Chile continental. M es la unión de las unidades con presencias (directas y por fallback) más las que intersectan el **casco convexo** de las presencias, lo que evita áreas fragmentadas en parches; G es la cuenca de proyección. La salida se calcula en G ∩ M.
 2. **Predictores.** Se construye un mosaico anual por año (2017–2024) y se calcula la mediana entre esos mosaicos. Se agrega el uso de suelo y todo se recorta a M, en EPSG:32719 y 250 m.
 3. **Selección de variables (VIF).** Se descarga localmente una grilla de M (500 m, o 1 000 m si el área supera 50 000 km²), se muestrean 1 500 celdas válidas y se eliminan iterativamente las variables con VIF ≥ 10.
 4. **Celdas de entrenamiento.** Se descarga localmente la grilla de 250 m con las variables seleccionadas, y se leen los valores con `rasterio`. Las presencias se asignan a celdas y se aplica *thinning* de 1 km (un punto por bloque de 4 × 4 celdas). Los fondos son celdas aleatorias de M (1:1 con las presencias). Las pseudo-ausencias son el 25 % de las presencias (mínimo 5) por cada fuente de polígonos. Ninguna celda se repite entre clases; el proceso lo verifica en cada corrida.
@@ -75,6 +75,9 @@ Notas sobre los embeddings:
 | `THINNING_METERS` | 1 000 m | Separación mínima entre presencias de entrenamiento |
 | `FONDO_RATIO` / `PSEUDO_RATIO` / `MIN_PSEUDO` | 1,0 / 0,25 / 5 | Fondos y pseudo-ausencias respecto de las presencias |
 | `MIN_RECORDS` / `MIN_CELDAS_PRESENCIA` | 20 / 20 | Mínimos de registros y de bloques de presencia |
+| `INCLUIR_CASCO_CONVEXO` / `CASCO_MIN_PRES` | True / 3 | M incluye las unidades que intersectan el casco de presencias |
+| `OUTLIER_KNN_K` / `OUTLIER_KNN_KM` / `OUTLIER_MIN_PRES` | 3 / 100 km / 10 | Criterio de descarte de presencias outliers (aisladas) |
+| `CONTINENTE_LON_MIN` / `LAT_MIN` / `LAT_MAX` | −76 / −56,6 / −17,4 | Rectángulo de Chile continental para el paso A |
 | `AREA_MODELACION_MAX_KM2` | 20 000 km² | Área M máxima para lanzar corridas nuevas |
 | `GEE_REINTENTOS` / `GEE_BACKOFF_S` | 3 / 10 s | Reintentos ante errores transitorios de GEE |
 
@@ -169,7 +172,7 @@ El separador es coma (`,`). Otras columnas se ignoran.
 
 #### 3. Unidades de cuenca (Chile: subcuencas BNA)
 
-Para el paso A, el área M se construye a partir de la **Base Nacional de Aguas (BNA)** de la Dirección General de Aguas (DGA), en `Data/Subcuencas/SubCuencas_BNA/SubCuencas_BNA.shp`. Los campos usados son `COD_SUBC`, `NOM_SUBC` y `COD_CUEN`.
+Para el paso A, el área M se construye a partir de la **Base Nacional de Aguas (BNA)** de la Dirección General de Aguas (DGA), en `Data/Subcuencas/SubCuencas_BNA/SubCuencas_BNA.shp`. Los campos usados son `COD_SUBC`, `NOM_SUBC` y `COD_CUEN`. Del shapefile solo se conservan las unidades cuyo punto representativo cae dentro del rectángulo de Chile continental (`CONTINENTE_*` en la configuración): con la BNA queda fuera únicamente Isla de Pascua e Islas Juan Fernández. Si trabajas con otra capa, ajusta ese rectángulo o vacíalo con valores imposibles (p. ej., `CONTINENTE_LON_MIN = -180`).
 
 #### 4. Polígonos de pseudo-ausencias
 
@@ -208,7 +211,8 @@ Todos los parámetros están en `Scripts/config_modelacion.py`. Los valores por 
 |---|---|
 | `Data/Areas_Modelacion/area_<especie>.geojson` | Área de calibración M de cada especie |
 | `Data/Areas_Modelacion/areas_modelacion.gpkg` | Todas las áreas en un solo GeoPackage |
-| `Resultados/resumen_areas_modelacion.csv` | Resumen del paso A (subcuencas, puntos y área por especie) |
+| `Resultados/resumen_areas_modelacion.csv` | Resumen del paso A (subcuencas, outliers, casco y área por especie) |
+| `Resultados/outliers_descartados.csv` | Presencias outliers descartadas en el paso A, con su distancia kNN (auditoría) |
 | `Resultados/Modelos_Distribucion/<especie>/<especie>.tif` | Probabilidad de idoneidad en G ∩ M (EPSG:32719, 250 m) |
 | `Resultados/log_modelacion.csv` | Bitácora del paso B: estado y cifras de cada corrida |
 
@@ -219,6 +223,7 @@ Los valores de los rasters van de 0 a 1 y representan **idoneidad ambiental rela
 - **Idoneidad, no presencia.** Un modelo entrenado con datos de presencia indica qué tan parecidas son las condiciones de cada celda a las de los registros. No confirma que la especie esté allí.
 - **La ausencia de registros no equivale a ausencia de la especie.** Un registro faltante puede deberse a falta de muestreo, de detección o de publicación de datos.
 - **Sesgo de muestreo.** Los modelos reproducen el esfuerzo de muestreo de los datos. Las zonas más visitadas tienden a quedar sobrerrepresentadas.
+- **Filtrado de outliers automático.** El paso A descarta presencias aisladas (criterio kNN) sin revisión humana. Revisa `Resultados/outliers_descartados.csv`; si un descarte fue incorrecto, ajústalo en tus datos o recalibra los parámetros (`OUTLIER_KNN_KM`, `OUTLIER_KNN_K`).
 - **Validación pendiente.** El proceso aún no incluye una etapa de validación cuantitativa (por ejemplo, AUC o evaluación con datos independientes). Se añadirá en una versión posterior. Mientras tanto, los resultados deben interpretarse como un modelo preliminar, sin métricas de desempeño.
 - **Resolución.** Los predictores se procesan a 250 m. Especies de distribución muy localizada pueden requerir una resolución más fina y datos más precisos.
 - **Datos sensibles.** Publicar coordenadas exactas de especies amenazadas puede exponerlas a perturbación. Considera generalizar o agregar esas coordenadas antes de compartir resultados.
@@ -268,7 +273,7 @@ The process has two steps:
 
 | Step | Script | What it does |
 |---|---|---|
-| **A. Modelling areas** | `Scripts/generar_areas_modelacion.py` | For each species, defines the calibration area **M** (union of basin units containing presences) and a projection area **G** (one basin). Output is computed on **G ∩ M**. |
+| **A. Modelling areas** | `Scripts/generar_areas_modelacion.py` | For each species, defines the calibration area **M** (union of basin units containing presences plus those intersecting their convex hull, after an outlier filter) and a projection area **G** (one basin). Output is computed on **G ∩ M**. |
 | **B. Batch modelling** | `Scripts/modelar_especies_batch.py` | Runs one model per species (steps below). |
 
 Step B, per species:
@@ -297,7 +302,7 @@ Notes on the embeddings:
 
 #### Per-species processing flow
 
-1. **Areas M and G.** M is the union of basin units containing presences; G is the projection basin. Output is computed on G ∩ M.
+1. **Areas M and G.** Outlier presences are discarded (isolated points: distance to the 3rd nearest neighbour > 100 km; every removal is logged to an audit CSV). Only continental Chile basin units are kept. M is the union of units with presences (direct and nearest-basin fallback) plus the units intersecting the presences' **convex hull**, which avoids fragmented patch areas; G is the projection basin. Output is computed on G ∩ M.
 2. **Predictors.** One annual mosaic per year (2017–2024) is built and the median across those mosaics is computed. Land use is added, and everything is clipped to M, in EPSG:32719 at 250 m.
 3. **Variable selection (VIF).** A grid of M is downloaded locally (500 m, or 1 000 m if the area exceeds 50 000 km²), 1 500 valid cells are sampled, and variables with VIF ≥ 10 are removed iteratively.
 4. **Training cells.** The 250 m grid with the selected variables is downloaded locally and read with `rasterio`. Presences are assigned to cells and thinned to 1 km (one point per 4 × 4 cell block). Background points are random cells within M (1:1 with presences). Pseudo-absences are 25 % of the presences (minimum 5) per polygon source. No cell is shared between classes; the process checks this on every run.
@@ -315,6 +320,9 @@ Notes on the embeddings:
 | `THINNING_METERS` | 1 000 m | Minimum separation between training presences |
 | `FONDO_RATIO` / `PSEUDO_RATIO` / `MIN_PSEUDO` | 1.0 / 0.25 / 5 | Background and pseudo-absences relative to presences |
 | `MIN_RECORDS` / `MIN_CELDAS_PRESENCIA` | 20 / 20 | Minimum records and presence blocks |
+| `INCLUIR_CASCO_CONVEXO` / `CASCO_MIN_PRES` | True / 3 | M includes units intersecting the presence hull |
+| `OUTLIER_KNN_K` / `OUTLIER_KNN_KM` / `OUTLIER_MIN_PRES` | 3 / 100 km / 10 | Outlier presence removal rule (isolated points) |
+| `CONTINENTE_LON_MIN` / `LAT_MIN` / `LAT_MAX` | −76 / −56.6 / −17.4 | Continental Chile rectangle for step A |
 | `AREA_MODELACION_MAX_KM2` | 20 000 km² | Maximum M area for starting new runs |
 | `GEE_REINTENTOS` / `GEE_BACKOFF_S` | 3 / 10 s | Retries on transient GEE errors |
 
@@ -409,7 +417,7 @@ The separator is a comma (`,`). Other columns are ignored.
 
 #### 3. Basin units (Chile: BNA sub-basins)
 
-For step A, the area M is built from the **Base Nacional de Aguas (BNA)** of the Chilean *Dirección General de Aguas* (DGA), at `Data/Subcuencas/SubCuencas_BNA/SubCuencas_BNA.shp`. Fields used: `COD_SUBC`, `NOM_SUBC` and `COD_CUEN`.
+For step A, the area M is built from the **Base Nacional de Aguas (BNA)** of the Chilean *Dirección General de Aguas* (DGA), at `Data/Subcuencas/SubCuencas_BNA/SubCuencas_BNA.shp`. Fields used: `COD_SUBC`, `NOM_SUBC` and `COD_CUEN`. Only units whose representative point falls inside the continental Chile rectangle (`CONTINENTE_*` in the configuration) are kept: in the BNA this excludes only Easter Island and the Juan Fernández Archipelago. With another layer, adjust that rectangle or neutralise it with impossible values (e.g. `CONTINENTE_LON_MIN = -180`).
 
 #### 4. Pseudo-absence polygons
 
@@ -448,7 +456,8 @@ All parameters are in `Scripts/config_modelacion.py`. Default values correspond 
 |---|---|
 | `Data/Areas_Modelacion/area_<species>.geojson` | Calibration area M for each species |
 | `Data/Areas_Modelacion/areas_modelacion.gpkg` | All areas in one GeoPackage |
-| `Resultados/resumen_areas_modelacion.csv` | Step A summary (sub-basins, points and area per species) |
+| `Resultados/resumen_areas_modelacion.csv` | Step A summary (sub-basins, outliers, hull and area per species) |
+| `Resultados/outliers_descartados.csv` | Outlier presences discarded in step A, with their kNN distance (audit) |
 | `Resultados/Modelos_Distribucion/<species>/<species>.tif` | Suitability in G ∩ M (EPSG:32719, 250 m) |
 | `Resultados/log_modelacion.csv` | Step B log: status and figures per run |
 
@@ -459,6 +468,7 @@ Raster values range from 0 to 1 and represent **relative environmental suitabili
 - **Suitability, not presence.** A model trained on presence data indicates how similar the conditions of each cell are to those of the records. It does not confirm that the species is there.
 - **Absence of records is not absence of the species.** A missing record may reflect lack of sampling, detection or data publication.
 - **Sampling bias.** Models reflect the sampling effort in the data. Heavily surveyed areas tend to be overrepresented.
+- **Automatic outlier filtering.** Step A discards isolated presences (kNN rule) without human review. Check `Resultados/outliers_descartados.csv`; if a removal looks wrong, fix it in your data or recalibrate the parameters (`OUTLIER_KNN_KM`, `OUTLIER_KNN_K`).
 - **Validation pending.** The process does not yet include a quantitative validation stage (for example AUC or evaluation with independent data). It will be added in a later version. Until then, results should be interpreted as a preliminary model without performance metrics.
 - **Resolution.** Predictors are processed at 250 m. Very localised species may require finer resolution and more precise data.
 - **Sensitive data.** Publishing exact coordinates of threatened species may expose them to disturbance. Consider generalising or withholding those coordinates before sharing results.
